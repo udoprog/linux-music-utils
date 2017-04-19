@@ -1,0 +1,56 @@
+#!/bin/bash
+
+set -e
+
+root=$(dirname $(dirname $(realpath $0)))
+cpuset=$root/bin/lmu-cpuset
+rc=$HOME/.lmurc
+
+if [[ ! -f $rc ]]; then
+    echo "Configuration does not exist: $rc"
+    exit 1
+fi
+
+source $rc
+
+if [[ ! -f $cpuset ]]; then
+    echo "Does not exist: $cpuset"
+    exit 1
+fi
+
+if [[ -z $TOOLS ]]; then
+    echo "$rc: TOOLS is not defined"
+    echo "Example:"
+    echo "TOOLS=\"qjackctl:0 ardour5:1\""
+    exit 1
+fi
+
+if [[ -z $CPUS ]]; then
+    echo "$rc: CPUS is not defined"
+    echo "CPUS=\"0-1 2-3 4-7\""
+    exit 1
+fi
+
+shutdown() {
+    $cpuset stop
+    wait
+}
+
+trap "shutdown" INT QUIT
+
+$cpuset start $CPUS
+
+for tool in $TOOLS; do
+    command=${tool%:*}
+    id=${tool##*:}
+
+    # TODO: log to syslog?
+    $command > /dev/null 2> /dev/null &
+    pid=$!
+    $cpuset rt $id $pid
+done
+
+echo "Waiting for child processes to stop..."
+wait
+
+shutdown

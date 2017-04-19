@@ -1,0 +1,136 @@
+#!/bin/bash
+
+set -e
+
+cpuset_dir=${CPUSET_DIR:-/cpuset}
+
+if [[ $UID != 0 ]]; then
+    exec sudo -p "[sudo] password for %p (cpuset): " CPUSET_DIR="$cpuset_dir" $0 "$@"
+    # never reach
+    exit -1
+fi
+
+function stop() {
+    echo "Reverting all tasks to default cpuset"
+
+    for cpu_set in $(ls -1 $cpuset_dir); do
+        subdir=$cpuset_dir/$cpu_set
+
+        if [[ ! -d $subdir ]]; then
+            continue
+        fi
+
+        # Only revert cpusets we created
+        case $cpu_set in
+            rt*) ;;
+            "sys") ;;
+            *) continue ;;
+        esac
+
+        while read task; do
+            echo $task > $cpuset_dir/tasks || true
+        done < $subdir/tasks
+
+        echo "Removing $subdir"
+        rmdir $subdir
+    done
+
+    echo "Unmounting $cpuset_dir"
+    umount $cpuset_dir
+    rmdir $cpuset_dir
+}
+
+function start() {
+    sys_cpus=$1
+    shift
+
+    if [[ -z $sys_cpus ]]; then
+        echo "Bad arguments ($@)..."
+        echo "Usage: cpuset start <system-cpus> [rt0-cpus [rt1-cpus [..]]]"
+        exit 1
+    fi
+
+    sys=$cpuset_dir/sys
+    mkdir -p $sys
+    echo "Setting up sys: $sys_cpus"
+    echo $sys_cpus > $sys/cpuset.cpus
+    echo 1 > $sys/cpuset.cpu_exclusive
+    echo 0 > $sys/cpuset.mems
+
+    count=0
+
+    while [[ $# > 0 ]]; do
+        cpus=$1
+        shift
+        id=$count
+        count=$[ $count + 1 ]
+        rt_name="rt${id}"
+        rt=$cpuset_dir/$rt_name
+
+        echo "Setting up $rt_name: $cpus"
+
+        mkdir -p $rt
+        echo $cpus > $rt/cpuset.cpus
+        echo 1 > $rt/cpuset.cpu_exclusive
+        echo 0 > $rt/cpuset.mems
+        echo 0 > $rt/cpuset.sched_load_balance
+        echo 1 > $rt/cpuset.mem_hardwall
+    done
+
+    no_move=0
+    moved=0
+
+    while read task; do
+        if ! echo $task > $cpuset_dir/sys/tasks; then
+            no_move=$[ $no_move + 1 ]
+        else
+            moved=$[ $moved + 1 ]
+        fi 2> /dev/null
+    done < $cpuset_dir/tasks
+
+    total=$[ $no_move + $moved ]
+    echo "Moved ${moved}/${total} tasks(s) to sys cpuset"
+}
+
+function rt() {
+    cd $cpuset_dir
+
+    group=$1
+    pid=$2
+
+    if [[ -z $group || -z $pid ]]; then
+        echo "Bad arguments ($@)..."
+        echo "Usage: cpuset rt <0|1> <pid>"
+        exit 1
+    fi
+
+    echo "Assigning $pid to rt$group cpuset"
+    echo $pid > rt$group/tasks
+}
+
+if [[ ! -d $cpuset_dir ]]; then
+    mkdir -p $cpuset_dir
+fi
+
+if ! grep " $cpuset_dir" /proc/mounts > /dev/null; then
+    echo "mounting: $cpuset_dir"
+    sudo mount -t cpuset none $cpuset_dir
+fi
+
+task=${1:-start}
+shift
+
+case $task in
+    "start")
+        start "$@"
+        ;;
+    "stop")
+        stop "$@"
+        ;;
+    "rt")
+        rt "$@"
+        ;;
+    *)
+        echo "No such task: $1"
+        ;;
+esac
