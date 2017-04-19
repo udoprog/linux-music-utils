@@ -20,6 +20,15 @@ CPUS="0-1 2-3 4-7"
 
 # List of tools and which group to map them to <tool>:<id>
 TOOLS="qjackctl:0 ardour5:1"
+
+# USB MODEL_ID name to apply priority for
+# Find out your model ID through 'nmu-usb-scan'
+#USB_DEVICE="Scarlett_2i2_USB"
+
+# IRQ mask.
+# The mask defines which CPUs are dedicated towards, this is a binary mask that indicates which
+# CPUs a given irq should have affinity towards.
+USB_IRQ_MASK="03"
 ```
 
 Now, run lmu:

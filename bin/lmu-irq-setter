@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""
+Sets all (possible) IRQ smp_affinity values according to arguments, then
+executes the given command.
+"""
+
+LMU_IRQ_ROOT = 'LMU_IRQ_ROOT'
+# TODO: figure this shit out
+CPU_MASK = 0xff
+
+import time
+import os
+import sys
+import subprocess as sp
+
+def dump_spec(values):
+    result = list()
+
+    for (full_path, mask) in values.values():
+        result.append(full_path)
+        result.append('{:02x}'.format(mask))
+
+    return result
+
+def get_state():
+    for e in os.listdir('/proc/irq'):
+        full_path = os.path.join('/proc/irq', e)
+
+        if os.path.isdir(full_path):
+            affinity_path = os.path.join(full_path, 'smp_affinity')
+
+            with open(affinity_path) as f:
+                yield int(e), (affinity_path, int(f.read(), 16))
+
+def apply_masks(fd, masks):
+    for irq, (full_path, value) in masks.items():
+        print('set {} {:02x}'.format(full_path, value), file=fd)
+
+def self_as_root(spec):
+    """
+    Run self as root with the given specification.
+    """
+
+    self_exe = os.path.realpath(sys.argv[0])
+    env = dict()
+    env[LMU_IRQ_ROOT] = 'yes'
+    p = sp.Popen(['sudo', '-E', self_exe] + spec, env=env)
+    p.wait()
+
+def entry():
+    # when running itself as root
+    if LMU_IRQ_ROOT in os.environ:
+        spec = sys.argv[1:]
+
+        while len(spec) > 0:
+            value = spec.pop()
+            full_path = spec.pop()
+
+            try:
+                with open(full_path, 'w') as f:
+                    f.write(value)
+            except Exception as e:
+                print('NOTE: Failed to update: {}:'.format(full_path), str(e))
+
+        sys.exit(0)
+        return
+
+    if len(sys.argv) < 3:
+        print('usage: lmu-irq-setter <irq> <mask> <command> [args]')
+        sys.exit(1)
+        return
+
+    irq = int(sys.argv[1])
+    mask = int(sys.argv[2], 16)
+    inverted_mask = ~mask & CPU_MASK
+
+    original = dict(get_state())
+
+    updated = dict(original)
+
+    for key, (full_path, _) in updated.items():
+        updated[key] = (full_path, inverted_mask)
+
+    updated[irq] = (updated[irq][0], mask)
+
+    self_as_root(dump_spec(updated))
+
+    try:
+        sp.run(sys.argv[3:])
+    finally:
+        self_as_root(dump_spec(original))
+
+if __name__ == "__main__":
+    entry()

@@ -4,9 +4,11 @@ set -e
 
 root=$(dirname $(dirname $(realpath $0)))
 cpuset=$root/bin/lmu-cpuset
+irq_setter=$root/bin/lmu-irq-setter
 rc=$HOME/.lmurc
 
 PASUSPENDER_ACTIVE=${PASUSPENDER_ACTIVE:-no}
+IRQ_SETTER_ACTIVE=${IRQ_SETTER_ACTIVE:-no}
 
 if [[ ! -f $rc ]]; then
     echo "Configuration does not exist: $rc"
@@ -16,6 +18,7 @@ fi
 source $rc
 
 PASUSPENDER=${PASUSPENDER:-yes}
+USB_DEVICE=${USB_DEVICE:-""}
 
 if [[ ! -f $cpuset ]]; then
     echo "Does not exist: $cpuset"
@@ -35,7 +38,35 @@ if [[ -z $CPUS ]]; then
     exit 1
 fi
 
-shutdown() {
+if [[ ! -z $USB_DEVICE && ! -z $USB_IRQ_MASK && $IRQ_SETTER_ACTIVE != "yes" ]]; then
+    echo "Applying IRQ priority for device '$USB_DEVICE'"
+
+    while read device_path; do
+        sys_path=$(udevadm info -q path -n $device_path)
+
+        if udevadm info -q property -p $sys_path | grep -E "^ID_MODEL=$USB_DEVICE$" > /dev/null; then
+            irq_path=/sys$(dirname $(dirname $sys_path))/irq
+
+            if [[ ! -x $irq_path ]]; then
+                irq=$(cat $irq_path)
+                break
+            else
+                echo "Missing IRQ path: $irq_path"
+            fi
+        fi
+    done < <(find /dev/bus/usb -type c)
+
+    if [[ -z $irq ]]; then
+        echo "Could not find IRQ for device $USB_DEVICE"
+        exit 1
+    fi
+
+    echo "Found IRQ for $USB_DEVICE: $irq, applying..."
+    exec env IRQ_SETTER_ACTIVE=yes $irq_setter $irq $USB_IRQ_MASK $0 "$@"
+    exit 1
+fi
+
+function shutdown() {
     $cpuset stop
 }
 

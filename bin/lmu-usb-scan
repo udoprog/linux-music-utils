@@ -1,0 +1,8 @@
+#!/bin/bash
+
+echo 'Available Devices (use value as USB_DEVICE) in ~/.lmurc:'
+
+while read device_path; do
+    sys_path=$(udevadm info -q path -n $device_path)
+    udevadm info -q property -p $sys_path | grep 'ID_MODEL='
+done < <(find /dev/bus/usb -type c)
