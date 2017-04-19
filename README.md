@@ -4,7 +4,7 @@ Contains a set of scripts that configures your Linux environment suitable for Mu
 
 Currently is capable of setting up CPU groups for a set of tools (see [Usage][usage]).
 
-[config]: #usage
+[usage]: #usage
 
 # Usage
 
