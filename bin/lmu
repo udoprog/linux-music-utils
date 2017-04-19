@@ -6,12 +6,16 @@ root=$(dirname $(dirname $(realpath $0)))
 cpuset=$root/bin/lmu-cpuset
 rc=$HOME/.lmurc
 
+PASUSPENDER_ACTIVE=${PASUSPENDER_ACTIVE:-no}
+
 if [[ ! -f $rc ]]; then
     echo "Configuration does not exist: $rc"
     exit 1
 fi
 
 source $rc
+
+PASUSPENDER=${PASUSPENDER:-yes}
 
 if [[ ! -f $cpuset ]]; then
     echo "Does not exist: $cpuset"
@@ -33,10 +37,13 @@ fi
 
 shutdown() {
     $cpuset stop
-    wait
 }
 
-trap "shutdown" INT QUIT
+if [[ $PASUSPENDER == "yes" && $PASUSPENDER_ACTIVE != "yes" ]]; then
+    echo "Suspending PulseAudio"
+    exec env PASUSPENDER_ACTIVE=yes pasuspender -- $0 "$@"
+    exit 1
+fi
 
 $cpuset start $CPUS
 
